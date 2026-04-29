@@ -1,9 +1,10 @@
 // ==UserScript==
-// @name         DX - Click to Copy - lbl_consno & lbl_totalitems
+// @name         DX - Click to Copy Consignment Number and No. of Items
 // @namespace    http://tampermonkey.net/
 // @version      1.1
 // @description  Copies element text to clipboard on click and adds 'clicked' class
-// @match        *://*/*
+// @match        https://dxfreight.co.uk/dm6lite/*
+// @match        https://dm6.dxfreight.co.uk/dm6lite/*
 // @grant        none
 // @run-at       document-end
 // ==/UserScript==
