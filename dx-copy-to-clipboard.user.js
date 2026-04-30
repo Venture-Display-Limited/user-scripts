@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto-Clipboard/Click to Copy - lbl_consno & lbl_totalitems
 // @namespace    http://tampermonkey.net/
-// @version      1.2
+// @version      1.3
 // @description  Copies element text to clipboard on click, plus auto-copies #lbl_consno when it appears
 // @match        https://dxfreight.co.uk/dm6lite/*
 // @match        https://dm6.dxfreight.co.uk/dm6lite/*
@@ -17,6 +17,16 @@
 
 	// Track whether we've already auto-copied #lbl_consno so we don't repeat on DOM mutations
 	let autoCopied = false;
+
+	// Inject a stylesheet that appends a tick emoji after any element with the 'auto-copied' class
+	function injectStyles() {
+		// Create a <style> element to hold our CSS rule
+		const style = document.createElement('style');
+		// Define the ::after rule that adds the tick with a small left margin for spacing
+		style.textContent = '#lbl_consno.auto-copied::after { content: " ✅"; }';
+		// Append the style element to the document head
+		document.head.appendChild(style);
+	}
 
 	// Click handler attached to each target element
 	function handleClick(event) {
@@ -70,12 +80,17 @@
 					GM_setClipboard(text);
 					// Add the 'clicked' class to mirror the manual click behaviour
 					consEl.classList.add('clicked');
+					// Add the 'auto-copied' class so the CSS ::after rule appends the tick emoji
+					consEl.classList.add('auto-copied');
 					// Flip the flag so we don't auto-copy again later in the session
 					autoCopied = true;
 				}
 			}
 		}
 	}
+
+	// Inject the tick emoji stylesheet up front so it's ready before any auto-copy happens
+	injectStyles();
 
 	// Run an initial check in case the elements are already present at script start
 	checkForTargets();
