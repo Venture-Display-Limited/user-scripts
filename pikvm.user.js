@@ -2,6 +2,7 @@
 // @name         PiKVM - Disable "Leave site?" prompt
 // @namespace    venture
 // @match        https://kvm-caldera-a.venturebanners.network/*
+// @match        https://kvm-prep-it-b.venturebanners.network/*
 // @match        https://kvm-backup-server.venturebanners.network/*
 // @run-at       document-start
 // @grant        none
