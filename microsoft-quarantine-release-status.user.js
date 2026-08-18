@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Quarantine Table Released Status Monitor
 // @namespace    http://tampermonkey.net/
-// @version      1.4
+// @version      1.5
 // @description  Monitors quarantine list rows, marks them based on "Released" status cells, and flags senders from common email providers
 // @author       You
 // @match        https://security.microsoft.com/quarantine*
@@ -14,6 +14,7 @@
         '@gmail.com',
         '@outlook.com',
         '@hotmail.com',
+        '@btconnect.com',
         '@yahoo.com',
         '@icloud.com',
         '@aol.com',
