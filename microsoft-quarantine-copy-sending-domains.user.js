@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Copy Sender Domains
 // @namespace    https://venturebanners.co.uk/
-// @version      1.0
-// @description  Extracts unique email domains from Sender cells and copies them to the clipboard
+// @version      1.1
+// @description  Copies unique sender domains from quarantine rows with a 'Needs review' status
 // @match        https://security.microsoft.com/quarantine*
 // @grant        GM_setClipboard
 // @run-at       document-idle
@@ -11,8 +11,15 @@
 (function () {
 	'use strict';
 
-	// Selector for the sender email text within each grid row
+	// Selector for each row of the quarantine grid
+	const ROW_SELECTOR = 'div[data-automationid="DetailsRow"]';
+
+	// Selectors for the cells read within a row
 	const SENDER_SELECTOR = 'div[data-automation-key="Sender"] span';
+	const STATUS_SELECTOR = 'div[data-automation-key="Status"] span';
+
+	// Only rows whose Status matches this are copied
+	const WANTED_STATUS = 'needs review';
 
 	// Default button label, restored after feedback messages
 	const DEFAULT_LABEL = 'Copy Sender Domains';
@@ -37,15 +44,27 @@
 		return value.slice(at + 1);
 	}
 
-	// Collects unique, sorted domains from all matching Sender elements on the page
+	// Reads the trimmed, lowercased text of a cell within a row, or '' if absent
 	// Example usage:
-	//   const domains = collectDomains();  // ['ashop.com.au', 'htcip.cn']
+	//   cellText(row, STATUS_SELECTOR);  // 'needs review'
+	function cellText(row, selector) {
+		const el = row.querySelector(selector);
+		return el ? el.textContent.trim().toLowerCase() : '';
+	}
+
+	// Collects unique, sorted domains from rows whose Status is 'Needs review'
+	// Example usage:
+	//   const domains = collectDomains();  // ['ogurese.gr.jp']
 	function collectDomains() {
 		// Set removes duplicate domains automatically
 		const domains = new Set();
-		// Walk every matching span and pull out its domain
-		document.querySelectorAll(SENDER_SELECTOR).forEach((el) => {
-			const domain = getDomain(el.textContent);
+		// Walk every row so the Sender is only read when the Status matches
+		document.querySelectorAll(ROW_SELECTOR).forEach((row) => {
+			// Skip Released, Denied, and any other status
+			if (cellText(row, STATUS_SELECTOR) !== WANTED_STATUS) {
+				return;
+			}
+			const domain = getDomain(cellText(row, SENDER_SELECTOR));
 			if (domain) {
 				domains.add(domain);
 			}
@@ -74,7 +93,7 @@
 		const domains = collectDomains();
 		// Nothing found, so tell the user rather than copying an empty string
 		if (domains.length === 0) {
-			flashButton(btn, 'No domains found', '#a4262c');
+			flashButton(btn, 'No "Needs review" rows', '#a4262c');
 			return;
 		}
 		// One domain per line
