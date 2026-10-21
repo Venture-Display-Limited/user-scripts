@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Copy Sender Domains
 // @namespace    https://venturebanners.co.uk/
-// @version      1.1
-// @description  Copies unique sender domains from quarantine rows with a 'Needs review' status
+// @version      1.2
+// @description  Adds a clickable Sender domain column to the quarantine grid, plus a button to copy all 'Needs review' domains
 // @match        https://security.microsoft.com/quarantine*
 // @grant        GM_setClipboard
 // @run-at       document-idle
@@ -18,14 +18,39 @@
 	const SENDER_SELECTOR = 'div[data-automation-key="Sender"] span';
 	const STATUS_SELECTOR = 'div[data-automation-key="Status"] span';
 
-	// Only rows whose Status matches this are copied
+	// Selector for the Sender gridcell itself, used as the clone source
+	const SENDER_CELL_SELECTOR = 'div[data-automation-key="Sender"]';
+
+	// Selector for the Sender column header, used as the clone source for the new header
+	const SENDER_HEADER_SELECTOR = 'div[data-automationid="ColumnsHeaderColumn"][data-item-key="Sender"]';
+
+	// Key identifying the injected column, kept distinct from Microsoft's own keys
+	const DOMAIN_KEY = 'VBSenderDomain';
+
+	// Selectors for the injected cells and headers
+	const DOMAIN_CELL_SELECTOR = `div[data-automation-key="${DOMAIN_KEY}"]`;
+	const DOMAIN_HEADER_SELECTOR = `div[data-item-key="${DOMAIN_KEY}"]`;
+
+	// Width of the injected column, matching the style attribute Fluent uses
+	const DOMAIN_COLUMN_WIDTH = '200px';
+
+	// Heading text for the injected column
+	const DOMAIN_COLUMN_LABEL = 'Sender domain';
+
+	// Only rows whose Status matches this are included by the copy-all button
 	const WANTED_STATUS = 'needs review';
 
 	// Default button label, restored after feedback messages
 	const DEFAULT_LABEL = 'Copy Sender Domains';
 
-	// How long feedback text stays on the button (ms)
+	// How long feedback text stays on the copy-all button (ms)
 	const FEEDBACK_MS = 3000;
+
+	// How long a clicked domain cell shows its copied confirmation (ms)
+	const CELL_FEEDBACK_MS = 1200;
+
+	// How long to wait for DOM changes to settle before re-injecting (ms)
+	const DEBOUNCE_MS = 100;
 
 	// Extracts the domain part from an email address, or returns null if invalid
 	// Example usage:
@@ -54,7 +79,7 @@
 
 	// Collects unique, sorted domains from rows whose Status is 'Needs review'
 	// Example usage:
-	//   const domains = collectDomains();  // ['ogurese.gr.jp']
+	//   const domains = collectDomains();  // ['brandlnkmedia.net', 'copyexpressyes.com']
 	function collectDomains() {
 		// Set removes duplicate domains automatically
 		const domains = new Set();
@@ -72,7 +97,128 @@
 		return [...domains].sort();
 	}
 
-	// Shows temporary feedback text on the button, then restores the default label
+	// Copies a single value to the clipboard and briefly confirms it on the clicked cell
+	// Example usage:
+	//   copyFromCell(domainSpan, 'htcip.cn');
+	function copyFromCell(span, domain) {
+		GM_setClipboard(domain, 'text');
+		// Flag the cell so the refresh pass leaves the confirmation text alone
+		span.dataset.vbFlashing = '1';
+		span.textContent = '✓ Copied';
+		span.style.color = '#107c10';
+		// Cancel any previous pending reset so rapid clicks behave
+		clearTimeout(span._resetTimer);
+		span._resetTimer = setTimeout(() => {
+			delete span.dataset.vbFlashing;
+			// Read the value back, in case the row was recycled while the confirmation showed
+			span.textContent = span.dataset.vbDomain || '';
+			span.style.color = '';
+		}, CELL_FEEDBACK_MS);
+	}
+
+	// Builds the injected domain cell for a row by cloning its Sender cell
+	// Example usage:
+	//   const cell = buildDomainCell(senderCell);
+	function buildDomainCell(senderCell) {
+		// Cloning inherits Fluent's hashed classes, so the cell stays styled correctly
+		const cell = senderCell.cloneNode(true);
+		// Re-key the clone so it is never mistaken for a real Sender cell
+		cell.setAttribute('data-automation-key', DOMAIN_KEY);
+		cell.style.width = DOMAIN_COLUMN_WIDTH;
+		const span = cell.querySelector('span');
+		// Without an inner span there is nothing to populate, so discard the clone
+		if (!span) {
+			return null;
+		}
+		// Present the value as a clickable control
+		span.setAttribute('role', 'button');
+		span.style.cursor = 'pointer';
+		span.style.textDecoration = 'underline dotted';
+		// Swallow the event so Fluent does not select the row or open the detail panel
+		['mousedown', 'mouseup', 'click'].forEach((type) => {
+			span.addEventListener(type, (e) => {
+				e.stopPropagation();
+				e.preventDefault();
+				// Only the click itself should copy
+				if (type === 'click' && span.dataset.vbDomain) {
+					copyFromCell(span, span.dataset.vbDomain);
+				}
+			});
+		});
+		return cell;
+	}
+
+	// Adds or refreshes the domain cell in every row, keeping it next to the Sender cell
+	// Example usage:
+	//   injectRowCells();
+	function injectRowCells() {
+		document.querySelectorAll(ROW_SELECTOR).forEach((row) => {
+			const senderCell = row.querySelector(SENDER_CELL_SELECTOR);
+			// Rows still rendering may have no Sender cell yet
+			if (!senderCell) {
+				return;
+			}
+			let cell = row.querySelector(DOMAIN_CELL_SELECTOR);
+			// Build the cell on first pass, or when Fluent has re-rendered the row
+			if (!cell) {
+				cell = buildDomainCell(senderCell);
+				if (!cell) {
+					return;
+				}
+				senderCell.insertAdjacentElement('afterend', cell);
+			}
+			const span = cell.querySelector('span');
+			const domain = getDomain(senderCell.textContent) || '';
+			// Fluent recycles row elements while scrolling, so the value is refreshed every pass
+			span.dataset.vbDomain = domain;
+			cell.title = senderCell.textContent.trim();
+			// Leave a copied confirmation on screen for its full duration
+			if (!span.dataset.vbFlashing && span.textContent !== domain) {
+				span.textContent = domain;
+			}
+		});
+	}
+
+	// Adds the column header after the Sender header, for both the fixed and sticky copies
+	// Example usage:
+	//   injectHeaderCells();
+	function injectHeaderCells() {
+		document.querySelectorAll(SENDER_HEADER_SELECTOR).forEach((senderHeader) => {
+			const headerRow = senderHeader.parentElement;
+			// Nothing to attach to if the header is detached mid-render
+			if (!headerRow || headerRow.querySelector(DOMAIN_HEADER_SELECTOR)) {
+				return;
+			}
+			// Cloning inherits Fluent's hashed classes, so the header stays styled correctly
+			const header = senderHeader.cloneNode(true);
+			header.setAttribute('data-item-key', DOMAIN_KEY);
+			header.removeAttribute('aria-sort');
+			header.removeAttribute('data-automationid');
+			header.style.width = DOMAIN_COLUMN_WIDTH;
+			// Strip ids and ARIA references that would otherwise duplicate the Sender header's
+			header.querySelectorAll('[id], [aria-labelledby], [aria-describedby]').forEach((el) => {
+				el.removeAttribute('id');
+				el.removeAttribute('aria-labelledby');
+				el.removeAttribute('aria-describedby');
+			});
+			// The sort chevron does nothing on an injected column
+			const chevron = header.querySelector('i[data-icon-name="ChevronDown"]');
+			if (chevron) {
+				chevron.remove();
+			}
+			// The deepest span holds the visible heading text
+			const title = header.querySelector('span span span') || header.querySelector('span');
+			if (title) {
+				title.textContent = DOMAIN_COLUMN_LABEL;
+			}
+			// The resize handle after the Sender header belongs to that boundary, so insert past it
+			const sizer = senderHeader.nextElementSibling;
+			const anchor = sizer && sizer.className.includes('cellSizer') ? sizer : senderHeader;
+			anchor.insertAdjacentElement('afterend', header);
+		});
+	}
+
+	// Shows temporary feedback text on the copy-all button, then restores the default label
 	// Example usage:
 	//   flashButton(btn, 'Copied 5 domains', '#107c10');
 	function flashButton(btn, text, colour) {
@@ -86,7 +232,7 @@
 		}, FEEDBACK_MS);
 	}
 
-	// Handles the button click: gathers domains and copies them to the clipboard
+	// Handles the copy-all click: gathers domains and copies them to the clipboard
 	// Example usage:
 	//   btn.addEventListener('click', () => handleClick(btn));
 	function handleClick(btn) {
@@ -104,7 +250,7 @@
 		console.log('[Copy Sender Domains]', domains);
 	}
 
-	// Creates the floating button and adds it to the page
+	// Creates the floating copy-all button and adds it to the page
 	// Example usage:
 	//   injectButton();
 	function injectButton() {
@@ -137,5 +283,33 @@
 		document.body.appendChild(btn);
 	}
 
-	injectButton();
+	// Watches the grid so the column survives scrolling, sorting, and view changes
+	const observer = new MutationObserver(() => schedule());
+
+	// Pending debounce timer for the injection pass
+	let timer = null;
+
+	// Runs the injection pass with the observer paused, so our own edits do not retrigger it
+	// Example usage:
+	//   run();
+	function run() {
+		observer.disconnect();
+		try {
+			injectHeaderCells();
+			injectRowCells();
+			injectButton();
+		} finally {
+			observer.observe(document.body, { childList: true, subtree: true });
+		}
+	}
+
+	// Coalesces bursts of DOM changes into a single injection pass
+	// Example usage:
+	//   schedule();
+	function schedule() {
+		clearTimeout(timer);
+		timer = setTimeout(run, DEBOUNCE_MS);
+	}
+
+	run();
 })();
